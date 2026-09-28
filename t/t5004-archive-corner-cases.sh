@@ -1,7 +1,14 @@
 #!/bin/sh
 
 test_description='test corner cases of git-archive'
+
 . ./test-lib.sh
+
+if ! test_have_prereq PERL_TEST_HELPERS
+then
+	skip_all='skipping archive corner cases tests; Perl not available'
+	test_done
+fi
 
 # the 10knuls.tar file is used to test for an empty git generated tar
 # without having to invoke tar because an otherwise valid empty GNU tar
@@ -131,7 +138,7 @@ test_expect_success ZIPINFO 'zip archive with many entries' '
 	do
 		for b in 0 1 2 3 4 5 6 7 8 9 a b c d e f
 		do
-			: >00/$a$b
+			: >00/$a$b || return 1
 		done
 	done &&
 	git add 00 &&
@@ -143,7 +150,7 @@ test_expect_success ZIPINFO 'zip archive with many entries' '
 	do
 		for d in 0 1 2 3 4 5 6 7 8 9 a b c d e f
 		do
-			echo "040000 tree $subtree	$c$d"
+			echo "040000 tree $subtree	$c$d" || return 1
 		done
 	done >tree &&
 	tree=$(git mktree <tree) &&
@@ -169,11 +176,7 @@ test_expect_success EXPENSIVE,UNZIP,UNZIP_ZIP64_SUPPORT \
 	blob=$(echo $s | git hash-object -w --stdin) &&
 
 	# create tree containing 65500 entries of that blob
-	for i in $(test_seq 1 65500)
-	do
-		echo "100644 blob $blob	$i"
-	done >tree &&
-	tree=$(git mktree <tree) &&
+	tree=$(test_seq -f "100644 blob $blob\t%d" 1 65500 | git mktree) &&
 
 	# zip it, creating an archive a bit bigger than 4GB
 	git archive -0 -o many-big.zip $tree &&
@@ -202,7 +205,7 @@ test_expect_success EXPENSIVE,LONG_IS_64BIT,UNZIP,UNZIP_ZIP64_SUPPORT,ZIPINFO \
 
 	"$GIT_UNZIP" -t big.zip &&
 	"$ZIPINFO" big.zip >big.lst &&
-	grep $size big.lst
+	test_grep $size big.lst
 '
 
 build_tree() {

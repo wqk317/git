@@ -1,5 +1,7 @@
-#include "cache.h"
+#include "git-compat-util.h"
 #include "oidset.h"
+#include "hex.h"
+#include "strbuf.h"
 
 void oidset_init(struct oidset *set, size_t initial_size)
 {
@@ -14,11 +16,37 @@ int oidset_contains(const struct oidset *set, const struct object_id *oid)
 	return pos != kh_end(&set->set);
 }
 
+bool oidset_equal(const struct oidset *a, const struct oidset *b)
+{
+	struct oidset_iter iter;
+	struct object_id *a_oid;
+
+	if (oidset_size(a) != oidset_size(b))
+		return false;
+
+	oidset_iter_init(a, &iter);
+	while ((a_oid = oidset_iter_next(&iter)))
+		if (!oidset_contains(b, a_oid))
+			return false;
+
+	return true;
+}
+
 int oidset_insert(struct oidset *set, const struct object_id *oid)
 {
 	int added;
 	kh_put_oid_set(&set->set, *oid, &added);
 	return !added;
+}
+
+void oidset_insert_from_set(struct oidset *dest, struct oidset *src)
+{
+	struct oidset_iter iter;
+	struct object_id *src_oid;
+
+	oidset_iter_init(src, &iter);
+	while ((src_oid = oidset_iter_next(&iter)))
+		oidset_insert(dest, src_oid);
 }
 
 int oidset_remove(struct oidset *set, const struct object_id *oid)
@@ -36,12 +64,14 @@ void oidset_clear(struct oidset *set)
 	oidset_init(set, 0);
 }
 
-void oidset_parse_file(struct oidset *set, const char *path)
+void oidset_parse_file(struct oidset *set, const char *path,
+		       const struct git_hash_algo *algop)
 {
-	oidset_parse_file_carefully(set, path, NULL, NULL);
+	oidset_parse_file_carefully(set, path, algop, NULL, NULL);
 }
 
 void oidset_parse_file_carefully(struct oidset *set, const char *path,
+				 const struct git_hash_algo *algop,
 				 oidset_parse_tweak_fn fn, void *cbdata)
 {
 	FILE *fp;
@@ -67,7 +97,7 @@ void oidset_parse_file_carefully(struct oidset *set, const char *path,
 		if (!sb.len)
 			continue;
 
-		if (parse_oid_hex(sb.buf, &oid, &p) || *p != '\0')
+		if (parse_oid_hex_algop(sb.buf, &oid, &p, algop) || *p != '\0')
 			die("invalid object name: %s", sb.buf);
 		if (fn && fn(&oid, cbdata))
 			continue;

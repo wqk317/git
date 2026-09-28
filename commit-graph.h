@@ -1,8 +1,7 @@
 #ifndef COMMIT_GRAPH_H
 #define COMMIT_GRAPH_H
 
-#include "git-compat-util.h"
-#include "object-store.h"
+#include "odb.h"
 #include "oidset.h"
 
 #define GIT_TEST_COMMIT_GRAPH "GIT_TEST_COMMIT_GRAPH"
@@ -10,23 +9,31 @@
 #define GIT_TEST_COMMIT_GRAPH_CHANGED_PATHS "GIT_TEST_COMMIT_GRAPH_CHANGED_PATHS"
 
 /*
+ * This environment variable controls whether commits looked up via the
+ * commit graph will be double checked to exist in the object database.
+ */
+#define GIT_COMMIT_GRAPH_PARANOIA "GIT_COMMIT_GRAPH_PARANOIA"
+
+/*
  * This method is only used to enhance coverage of the commit-graph
  * feature in the test suite with the GIT_TEST_COMMIT_GRAPH and
  * GIT_TEST_COMMIT_GRAPH_CHANGED_PATHS environment variables. Do not
- * call this method oustide of a builtin, and only if you know what
+ * call this method outside of a builtin, and only if you know what
  * you are doing!
  */
-void git_test_write_commit_graph_or_die(void);
+void git_test_write_commit_graph_or_die(struct odb_source *source);
 
 struct commit;
 struct bloom_filter_settings;
 struct repository;
-struct raw_object_store;
+struct object_database;
 struct string_list;
 
-char *get_commit_graph_filename(struct object_directory *odb);
-char *get_commit_graph_chain_filename(struct object_directory *odb);
+char *get_commit_graph_filename(struct odb_source *source);
+char *get_commit_graph_chain_filename(struct odb_source *source);
 int open_commit_graph(const char *graph_file, int *fd, struct stat *st);
+int open_commit_graph_chain(const char *chain_file, int *fd, struct stat *st,
+			    const struct git_hash_algo *hash_algo);
 
 /*
  * Given a commit struct, try to fill the commit struct info, including:
@@ -39,6 +46,21 @@ int open_commit_graph(const char *graph_file, int *fd, struct stat *st);
  * See parse_commit_buffer() for the fallback after this call.
  */
 int parse_commit_in_graph(struct repository *r, struct commit *item);
+
+/*
+ * Fills `*pos` with the graph position of `c`, and returns the graph `c` is
+ * found in, or NULL otherwise. Initializes the commit-graphs belonging to
+ * `r` if it hasn't been already.
+ *
+ * Note: this is a low-level helper that does not alter any slab data
+ * associated with `c`. Useful in circumstances where the slab data is
+ * already being modified (e.g., writing the commit-graph itself).
+ *
+ * In most cases, callers should use `parse_commit_in_graph()` instead.
+ */
+struct commit_graph *repo_find_commit_pos_in_graph(struct repository *r,
+						   struct commit *c,
+						   uint32_t *pos);
 
 /*
  * Look up the given commit ID in the commit-graph. This will only return a
@@ -63,12 +85,12 @@ struct commit_graph {
 	const unsigned char *data;
 	size_t data_len;
 
-	unsigned char hash_len;
+	const struct git_hash_algo *hash_algo;
 	unsigned char num_chunks;
 	uint32_t num_commits;
 	struct object_id oid;
 	char *filename;
-	struct object_directory *odb;
+	struct odb_source *odb_source;
 
 	uint32_t num_commits_in_base;
 	unsigned int read_generation_data;
@@ -79,20 +101,32 @@ struct commit_graph {
 	const unsigned char *chunk_commit_data;
 	const unsigned char *chunk_generation_data;
 	const unsigned char *chunk_generation_data_overflow;
+	size_t chunk_generation_data_overflow_size;
 	const unsigned char *chunk_extra_edges;
+	size_t chunk_extra_edges_size;
 	const unsigned char *chunk_base_graphs;
+	size_t chunk_base_graphs_size;
 	const unsigned char *chunk_bloom_indexes;
 	const unsigned char *chunk_bloom_data;
+	size_t chunk_bloom_data_size;
 
 	struct topo_level_slab *topo_levels;
 	struct bloom_filter_settings *bloom_filter_settings;
 };
 
-struct commit_graph *load_commit_graph_one_fd_st(struct repository *r,
-						 int fd, struct stat *st,
-						 struct object_directory *odb);
-struct commit_graph *read_commit_graph_one(struct repository *r,
-					   struct object_directory *odb);
+struct commit_graph *load_commit_graph_one_fd_st(struct odb_source *source,
+						 int fd, struct stat *st);
+struct commit_graph *load_commit_graph_chain_fd_st(struct object_database *odb,
+						   int fd, struct stat *st,
+						   int *incomplete_chain);
+struct commit_graph *read_commit_graph_one(struct odb_source *source);
+
+struct repo_settings;
+
+/*
+ * Callers should initialize the repo_settings with prepare_repo_settings()
+ * prior to calling parse_commit_graph().
+ */
 struct commit_graph *parse_commit_graph(struct repository *r,
 					void *graph_map, size_t graph_size);
 
@@ -138,20 +172,20 @@ struct commit_graph_opts {
  * is not compatible with the commit-graph feature, then the
  * methods will return 0 without writing a commit-graph.
  */
-int write_commit_graph_reachable(struct object_directory *odb,
+int write_commit_graph_reachable(struct odb_source *source,
 				 enum commit_graph_write_flags flags,
 				 const struct commit_graph_opts *opts);
-int write_commit_graph(struct object_directory *odb,
-		       struct string_list *pack_indexes,
+int write_commit_graph(struct odb_source *source,
+		       const struct string_list *pack_indexes,
 		       struct oidset *commits,
 		       enum commit_graph_write_flags flags,
 		       const struct commit_graph_opts *opts);
 
 #define COMMIT_GRAPH_VERIFY_SHALLOW	(1 << 0)
 
-int verify_commit_graph(struct repository *r, struct commit_graph *g, int flags);
+int verify_commit_graph(struct commit_graph *g, int flags);
 
-void close_commit_graph(struct raw_object_store *);
+void close_commit_graph(struct object_database *);
 void free_commit_graph(struct commit_graph *);
 
 /*
@@ -170,4 +204,12 @@ struct commit_graph_data {
  */
 timestamp_t commit_graph_generation(const struct commit *);
 uint32_t commit_graph_position(const struct commit *);
+
+/*
+ * After this method, all commits reachable from those in the given
+ * list will have non-zero, non-infinite generation numbers.
+ */
+void ensure_generations_valid(struct repository *r,
+			      struct commit **commits, size_t nr);
+
 #endif

@@ -49,7 +49,7 @@ test_expect_success 'result is really identical' '
 test_expect_success 'rewrite bare repository identically' '
 	(git config core.bare true && cd .git &&
 	 git filter-branch branch > filter-output 2>&1 &&
-	! fgrep fatal filter-output)
+	test_grep ! fatal filter-output)
 '
 git config core.bare false
 test_expect_success 'result is really identical' '
@@ -65,7 +65,7 @@ test_expect_success 'correct GIT_DIR while using -d' '
 	git filter-branch -d "$TRASHDIR/dfoo" \
 		--index-filter "cp \"$TRASHDIR\"/dfoo/backup-refs \"$TRASHDIR\"" \
 	) &&
-	grep drepo "$TRASHDIR/backup-refs"
+	test_grep drepo "$TRASHDIR/backup-refs"
 '
 
 test_expect_success 'tree-filter works with -d' '
@@ -92,8 +92,8 @@ test_expect_success 'rewrite, renaming a specific file' '
 
 test_expect_success 'test that the file was renamed' '
 	test D = "$(git show HEAD:doh --)" &&
-	! test -f D.t &&
-	test -f doh &&
+	test_path_is_missing D.t &&
+	test_path_is_file doh &&
 	test D = "$(cat doh)"
 '
 
@@ -103,10 +103,10 @@ test_expect_success 'rewrite, renaming a specific directory' '
 
 test_expect_success 'test that the directory was renamed' '
 	test dir/D = "$(git show HEAD:diroh/D.t --)" &&
-	! test -d dir &&
-	test -d diroh &&
-	! test -d diroh/dir &&
-	test -f diroh/D.t &&
+	test_path_is_missing dir &&
+	test_path_is_dir diroh &&
+	test_path_is_missing diroh/dir &&
+	test_path_is_file diroh/D.t &&
 	test dir/D = "$(cat diroh/D.t)"
 '
 
@@ -396,10 +396,7 @@ test_expect_success '--prune-empty is able to prune entire branch' '
 	git branch prune-entire B &&
 	git filter-branch -f --prune-empty --index-filter "git update-index --remove A.t B.t" prune-entire &&
 	test_must_fail git rev-parse refs/heads/prune-entire &&
-	if test_have_prereq REFFILES
-	then
-		test_must_fail git reflog exists refs/heads/prune-entire
-	fi
+	test_must_fail git reflog exists refs/heads/prune-entire
 '
 
 test_expect_success '--remap-to-ancestor with filename filters' '
@@ -506,7 +503,7 @@ test_expect_success 'rewrite repository including refs that point at non-commit 
 	git tag -a -m "tag to a tree" treetag $new_tree &&
 	git reset --hard HEAD &&
 	git filter-branch -f -- --all >filter-output 2>&1 &&
-	! fgrep fatal filter-output
+	test_grep ! fatal filter-output
 '
 
 test_expect_success 'filter-branch handles ref deletion' '
@@ -515,7 +512,7 @@ test_expect_success 'filter-branch handles ref deletion' '
 	git tag empty &&
 	git branch to-delete &&
 	git filter-branch -f --prune-empty to-delete >out 2>&1 &&
-	grep "to-delete.*was deleted" out &&
+	test_grep "to-delete.*was deleted" out &&
 	test_must_fail git rev-parse --verify to-delete
 '
 
@@ -526,8 +523,8 @@ test_expect_success 'filter-branch handles ref rewrite' '
 	git filter-branch -f \
 		--index-filter "git rm --ignore-unmatch --cached to-drop.t" \
 		 rewrite >out 2>&1 &&
-	grep "rewrite.*was rewritten" out &&
-	! grep -i warning out &&
+	test_grep "rewrite.*was rewritten" out &&
+	test_grep ! -i warning out &&
 	git diff-tree empty rewrite
 '
 
@@ -535,8 +532,8 @@ test_expect_success 'filter-branch handles ancestor rewrite' '
 	test_commit to-exclude &&
 	git branch ancestor &&
 	git filter-branch -f ancestor -- :^to-exclude.t >out 2>&1 &&
-	grep "ancestor.*was rewritten" out &&
-	! grep -i warning out &&
+	test_grep "ancestor.*was rewritten" out &&
+	test_grep ! -i warning out &&
 	git diff-tree HEAD^ ancestor
 '
 

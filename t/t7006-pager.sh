@@ -45,8 +45,8 @@ test_expect_success TTY 'LESS and LV envvars are set for pagination' '
 
 		test_terminal git log
 	) &&
-	grep ^LESS= pager-env.out &&
-	grep ^LV= pager-env.out
+	test_grep ^LESS= pager-env.out &&
+	test_grep ^LV= pager-env.out
 '
 
 test_expect_success !MINGW,TTY 'LESS and LV envvars set by git-sh-setup' '
@@ -58,8 +58,8 @@ test_expect_success !MINGW,TTY 'LESS and LV envvars set by git-sh-setup' '
 		export PATH &&
 		test_terminal sh -c ". git-sh-setup && git_pager"
 	) &&
-	grep ^LESS= pager-env.out &&
-	grep ^LV= pager-env.out
+	test_grep ^LESS= pager-env.out &&
+	test_grep ^LV= pager-env.out
 '
 
 test_expect_success TTY 'some commands do not use a pager' '
@@ -661,6 +661,13 @@ test_expect_success 'setup trace2' '
 	export GIT_TRACE2_BRIEF
 '
 
+test_expect_success 'setup large log output' '
+	test-tool genzeros 50000 |
+	tr "\000" "a" |
+	sed "s/a/this is a long commit message/g" >commit-msg &&
+	git commit --allow-empty -F commit-msg
+'
+
 test_expect_success TTY 'git returns SIGPIPE on early pager exit' '
 	test_when_finished "rm pager-used trace.normal" &&
 	test_config core.pager ">pager-used; head -n 1; exit 0" &&
@@ -670,7 +677,7 @@ test_expect_success TTY 'git returns SIGPIPE on early pager exit' '
 
 	if test_have_prereq !MINGW
 	then
-		OUT=$( ((test_terminal git log; echo $? 1>&3) | :) 3>&1 ) &&
+		{ test_terminal git log >/dev/null; OUT=$?; } &&
 		test_match_signal 13 "$OUT"
 	else
 		test_terminal git log
@@ -678,7 +685,7 @@ test_expect_success TTY 'git returns SIGPIPE on early pager exit' '
 
 	grep child_exit trace.normal >child-exits &&
 	test_line_count = 1 child-exits &&
-	grep " code:0 " child-exits &&
+	test_grep " code:0 " child-exits &&
 	test_path_is_file pager-used
 '
 
@@ -691,7 +698,7 @@ test_expect_success TTY 'git returns SIGPIPE on early pager non-zero exit' '
 
 	if test_have_prereq !MINGW
 	then
-		OUT=$( ((test_terminal git log; echo $? 1>&3) | :) 3>&1 ) &&
+		{ test_terminal git log >/dev/null; OUT=$?; } &&
 		test_match_signal 13 "$OUT"
 	else
 		test_terminal git log
@@ -699,7 +706,7 @@ test_expect_success TTY 'git returns SIGPIPE on early pager non-zero exit' '
 
 	grep child_exit trace.normal >child-exits &&
 	test_line_count = 1 child-exits &&
-	grep " code:1 " child-exits &&
+	test_grep " code:1 " child-exits &&
 	test_path_is_file pager-used
 '
 
@@ -710,71 +717,31 @@ test_expect_success TTY 'git discards pager non-zero exit without SIGPIPE' '
 	export GIT_TRACE2 &&
 	test_when_finished "unset GIT_TRACE2" &&
 
-	if test_have_prereq !MINGW
-	then
-		OUT=$( ((test_terminal git log; echo $? 1>&3) | :) 3>&1 ) &&
-		test "$OUT" -eq 0
-	else
-		test_terminal git log
-	fi &&
+	test_terminal git log &&
 
 	grep child_exit trace.normal >child-exits &&
 	test_line_count = 1 child-exits &&
-	grep " code:1 " child-exits &&
+	test_grep " code:1 " child-exits &&
 	test_path_is_file pager-used
 '
 
-test_expect_success TTY 'git discards nonexisting pager without SIGPIPE' '
-	test_when_finished "rm pager-used trace.normal" &&
-	test_config core.pager "wc >pager-used; does-not-exist" &&
-	GIT_TRACE2="$(pwd)/trace.normal" &&
-	export GIT_TRACE2 &&
-	test_when_finished "unset GIT_TRACE2" &&
-
-	if test_have_prereq !MINGW
-	then
-		OUT=$( ((test_terminal git log; echo $? 1>&3) | :) 3>&1 ) &&
-		test "$OUT" -eq 0
-	else
-		test_terminal git log
-	fi &&
-
-	grep child_exit trace.normal >child-exits &&
-	test_line_count = 1 child-exits &&
-	grep " code:127 " child-exits &&
-	test_path_is_file pager-used
-'
-
-test_expect_success TTY 'git attempts to page to nonexisting pager command, gets SIGPIPE' '
-	test_when_finished "rm trace.normal" &&
+test_expect_success TTY 'git errors when asked to execute nonexisting pager' '
+	test_when_finished "rm -f err" &&
 	test_config core.pager "does-not-exist" &&
-	GIT_TRACE2="$(pwd)/trace.normal" &&
-	export GIT_TRACE2 &&
-	test_when_finished "unset GIT_TRACE2" &&
-
-	if test_have_prereq !MINGW
-	then
-		OUT=$( ((test_terminal git log; echo $? 1>&3) | :) 3>&1 ) &&
-		test_match_signal 13 "$OUT"
-	else
-		test_terminal git log
-	fi &&
-
-	grep child_exit trace.normal >child-exits &&
-	test_line_count = 1 child-exits &&
-	grep " code:-1 " child-exits
+	test_must_fail test_terminal git log 2>err &&
+	test_grep "unable to execute pager" err
 '
 
 test_expect_success TTY 'git returns SIGPIPE on propagated signals from pager' '
 	test_when_finished "rm pager-used trace.normal" &&
-	test_config core.pager ">pager-used; test-tool sigchain" &&
+	test_config core.pager ">pager-used; exec test-tool sigchain" &&
 	GIT_TRACE2="$(pwd)/trace.normal" &&
 	export GIT_TRACE2 &&
 	test_when_finished "unset GIT_TRACE2" &&
 
 	if test_have_prereq !MINGW
 	then
-		OUT=$( ((test_terminal git log; echo $? 1>&3) | :) 3>&1 ) &&
+		{ test_terminal git log >/dev/null; OUT=$?; } &&
 		test_match_signal 13 "$OUT"
 	else
 		test_terminal git log
@@ -782,8 +749,13 @@ test_expect_success TTY 'git returns SIGPIPE on propagated signals from pager' '
 
 	grep child_exit trace.normal >child-exits &&
 	test_line_count = 1 child-exits &&
-	grep " code:143 " child-exits &&
+	test_grep " code:143 " child-exits &&
 	test_path_is_file pager-used
+'
+
+test_expect_success TTY 'non-existent pager doesnt cause crash' '
+	test_config pager.show invalid-pager &&
+	test_must_fail test_terminal git show
 '
 
 test_done

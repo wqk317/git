@@ -95,7 +95,7 @@ test_expect_success 'setup' '
 	while [ $cur -le 10 ]; do
 		add A$cur $(eval echo \$A$prev) &&
 		prev=$cur &&
-		cur=$(($cur+1))
+		cur=$(($cur+1)) || return 1
 	done &&
 	add B1 $A1 &&
 	git update-ref refs/heads/A "$ATIP" &&
@@ -112,7 +112,7 @@ test_expect_success 'post 1st pull setup' '
 	while [ $cur -le 65 ]; do
 		add B$cur $(eval echo \$B$prev) &&
 		prev=$cur &&
-		cur=$(($cur+1))
+		cur=$(($cur+1)) || return 1
 	done
 '
 
@@ -132,13 +132,18 @@ test_expect_success 'single branch object count' '
 '
 
 test_expect_success 'single given branch clone' '
-	git clone --single-branch --branch A "file://$(pwd)/." branch-a &&
-	test_must_fail git --git-dir=branch-a/.git rev-parse origin/B
+	GIT_TRACE2_EVENT="$(pwd)/branch-a/trace2_event" \
+		git clone --single-branch --branch A "file://$(pwd)/." branch-a &&
+	test_must_fail git --git-dir=branch-a/.git rev-parse origin/B &&
+	test_grep \"fetch-info\".*\"haves\":0 branch-a/trace2_event &&
+	test_grep \"fetch-info\".*\"wants\":1 branch-a/trace2_event
 '
 
 test_expect_success 'clone shallow depth 1' '
-	git clone --no-single-branch --depth 1 "file://$(pwd)/." shallow0 &&
-	test "$(git --git-dir=shallow0/.git rev-list --count HEAD)" = 1
+	GIT_TRACE2_EVENT="$(pwd)/shallow0/trace2_event" \
+		git clone --no-single-branch --depth 1 "file://$(pwd)/." shallow0 &&
+	test "$(git --git-dir=shallow0/.git rev-list --count HEAD)" = 1 &&
+	test_grep \"fetch-info\".*\"depth\":1 shallow0/trace2_event
 '
 
 test_expect_success 'clone shallow depth 1 with fsck' '
@@ -149,7 +154,8 @@ test_expect_success 'clone shallow depth 1 with fsck' '
 '
 
 test_expect_success 'clone shallow' '
-	git clone --no-single-branch --depth 2 "file://$(pwd)/." shallow
+	git clone --no-single-branch --depth 2 "file://$(pwd)/." shallow &&
+	git -C shallow config set maintenance.auto false
 '
 
 test_expect_success 'clone shallow depth count' '
@@ -161,7 +167,7 @@ test_expect_success 'clone shallow object count' '
 		cd shallow &&
 		git count-objects -v
 	) > count.shallow &&
-	grep "^in-pack: 12" count.shallow
+	test_grep "^in-pack: 12" count.shallow
 '
 
 test_expect_success 'clone shallow object count (part 2)' '
@@ -224,7 +230,7 @@ test_expect_success 'clone shallow object count' '
 		cd shallow &&
 		git count-objects -v
 	) > count.shallow &&
-	grep "^count: 6" count.shallow
+	test_grep "^count: 6" count.shallow
 '
 
 test_expect_success 'add two more (part 2)' '
@@ -235,7 +241,10 @@ test_expect_success 'add two more (part 2)' '
 test_expect_success 'deepening pull in shallow repo' '
 	(
 		cd shallow &&
-		git pull --depth 4 .. B
+		GIT_TRACE2_EVENT="$(pwd)/trace2_event" \
+			git pull --depth 4 .. B &&
+		test_grep \"fetch-info\".*\"depth\":4 trace2_event &&
+		test_grep \"fetch-info\".*\"shallows\":2 trace2_event
 	)
 '
 
@@ -244,7 +253,7 @@ test_expect_success 'clone shallow object count' '
 		cd shallow &&
 		git count-objects -v
 	) > count.shallow &&
-	grep "^count: 12" count.shallow
+	test_grep "^count: 12" count.shallow
 '
 
 test_expect_success 'deepening fetch in shallow repo' '
@@ -259,7 +268,7 @@ test_expect_success 'clone shallow object count' '
 		cd shallow &&
 		git count-objects -v
 	) > count.shallow &&
-	grep "^count: 18" count.shallow
+	test_grep "^count: 18" count.shallow
 '
 
 test_expect_success 'pull in shallow repo with missing merge base' '
@@ -289,7 +298,7 @@ test_expect_success 'clone shallow object count' '
 		git prune &&
 		git count-objects -v
 	) > count.shallow &&
-	grep "^count: 54" count.shallow
+	test_grep "^count: 54" count.shallow
 '
 
 test_expect_success 'fetch --no-shallow on full repo' '
@@ -306,9 +315,12 @@ test_expect_success 'fetch --depth --no-shallow' '
 test_expect_success 'turn shallow to complete repository' '
 	(
 		cd shallow &&
-		git fetch --unshallow &&
+		GIT_TRACE2_EVENT="$(pwd)/trace2_event" \
+			git fetch --unshallow &&
 		! test -f .git/shallow &&
-		git fsck --full
+		git fsck --full &&
+		test_grep \"fetch-info\".*\"shallows\":2 trace2_event &&
+		test_grep \"fetch-info\".*\"depth\":2147483647 trace2_event
 	)
 '
 
@@ -321,7 +333,7 @@ test_expect_success 'clone shallow object count' '
 		cd shallow2 &&
 		git count-objects -v
 	) > count.shallow2 &&
-	grep "^in-pack: 3" count.shallow2
+	test_grep "^in-pack: 3" count.shallow2
 '
 
 test_expect_success 'clone shallow with --branch' '
@@ -403,10 +415,11 @@ test_expect_success 'in_vain not triggered before first ACK' '
 	test_commit -C myserver bar &&
 
 	git -C myclient fetch --progress origin 2>log &&
-	test_i18ngrep "remote: Total 3 " log
+	test_grep "remote: Total 3 " log
 '
 
-test_expect_success 'in_vain resetted upon ACK' '
+test_expect_success 'in_vain reset upon ACK' '
+	test_when_finished rm -f log trace2 &&
 	rm -rf myserver myclient &&
 	git init myserver &&
 
@@ -432,8 +445,9 @@ test_expect_success 'in_vain resetted upon ACK' '
 	# first. The 256th commit is common between the client and the server,
 	# and should reset in_vain. This allows negotiation to continue until
 	# the client reports that first_anotherbranch_commit is common.
-	git -C myclient fetch --progress origin main 2>log &&
-	test_i18ngrep "Total 3 " log
+	GIT_TRACE2_EVENT="$(pwd)/trace2" git -C myclient fetch --progress origin main 2>log &&
+	test_grep \"key\":\"total_rounds\",\"value\":\"6\" trace2 &&
+	test_grep "Total 3 " log
 '
 
 test_expect_success 'fetch in shallow repo unreachable shallow objects' '
@@ -457,18 +471,18 @@ test_expect_success 'fetch creating new shallow root' '
 		git fetch --depth=1 --progress 2>actual &&
 		# This should fetch only the empty commit, no tree or
 		# blob objects
-		test_i18ngrep "remote: Total 1" actual
+		test_grep "remote: Total 1" actual
 	)
 '
 
 test_expect_success 'setup tests for the --stdin parameter' '
 	for head in C D E F
 	do
-		add $head
+		add $head || return 1
 	done &&
 	for head in A B C D E F
 	do
-		git tag $head $head
+		git tag $head $head || return 1
 	done &&
 	cat >input <<-\EOF &&
 	refs/heads/C
@@ -692,7 +706,7 @@ test_expect_success 'fetch-pack cannot fetch a raw sha1 that is not advertised a
 	# unadvertised objects, so restrict this test to v0.
 	test_must_fail env GIT_TEST_PROTOCOL_VERSION=0 git -C client fetch-pack ../server \
 		$(git -C server rev-parse refs/heads/main^) 2>err &&
-	test_i18ngrep "Server does not allow request for unadvertised object" err
+	test_grep "Server does not allow request for unadvertised object" err
 '
 
 check_prot_path () {
@@ -760,7 +774,7 @@ do
 	# file with scheme
 	for p in file
 	do
-		test_expect_success !MINGW "fetch-pack --diag-url $p://$h/$r" '
+		test_expect_success !WINDOWS "fetch-pack --diag-url $p://$h/$r" '
 			check_prot_path $p://$h/$r $p "/$r"
 		'
 		test_expect_success MINGW "fetch-pack --diag-url $p://$h/$r" '
@@ -770,7 +784,7 @@ do
 			check_prot_path $p:///$r $p "/$r"
 		'
 		# No "/~" -> "~" conversion for file
-		test_expect_success !MINGW "fetch-pack --diag-url $p://$h/~$r" '
+		test_expect_success !WINDOWS "fetch-pack --diag-url $p://$h/~$r" '
 			check_prot_path $p://$h/~$r $p "/~$r"
 		'
 		test_expect_success MINGW "fetch-pack --diag-url $p://$h/~$r" '
@@ -792,11 +806,17 @@ do
 	p=ssh
 	for h in host [::1]
 	do
-		test_expect_success "fetch-pack --diag-url $h:$r" '
+		expectation="success"
+		if test_have_prereq CYGWIN && test "$h" = "[::1]"
+		then
+			expectation="failure"
+		fi
+
+		test_expect_$expectation "fetch-pack --diag-url $h:$r" '
 			check_prot_host_port_path $h:$r $p "$h" NONE "$r"
 		'
 		# Do "/~" -> "~" conversion
-		test_expect_success "fetch-pack --diag-url $h:/~$r" '
+		test_expect_$expectation "fetch-pack --diag-url $h:/~$r" '
 			check_prot_host_port_path $h:/~$r $p "$h" NONE "~$r"
 		'
 	done
@@ -824,13 +844,15 @@ test_expect_success 'clone shallow since ...' '
 '
 
 test_expect_success 'fetch shallow since ...' '
-	git -C shallow11 fetch --shallow-since "200000000 +0700" origin &&
+	GIT_TRACE2_EVENT=$(pwd)/shallow11/trace2_event \
+		git -C shallow11 fetch --shallow-since "200000000 +0700" origin &&
 	git -C shallow11 log --pretty=tformat:%s origin/main >actual &&
 	cat >expected <<-\EOF &&
 	three
 	two
 	EOF
-	test_cmp expected actual
+	test_cmp expected actual &&
+	test_grep \"fetch-info\".*\"deepen-since\":true shallow11/trace2_event
 '
 
 test_expect_success 'clone shallow since selects no commits' '
@@ -871,15 +893,20 @@ test_expect_success 'shallow since with commit graph and already-seen commit' '
 	test_commit other &&
 	git commit-graph write --reachable &&
 	git config core.commitGraph true &&
+	oid_algo=$(test_oid algo) &&
+	oid_other=$(git rev-parse other) &&
+	oid_main=$(git rev-parse main) &&
 
-	GIT_PROTOCOL=version=2 git upload-pack . <<-EOF >/dev/null
-	0012command=fetch
-	$(echo "object-format=$(test_oid algo)" | packetize)
-	00010013deepen-since 1
-	$(echo "want $(git rev-parse other)" | packetize)
-	$(echo "have $(git rev-parse main)" | packetize)
+	test-tool pkt-line pack >input <<-EOF &&
+	command=fetch
+	object-format=$oid_algo
+	0001
+	deepen-since 1
+	want $oid_other
+	have $oid_main
 	0000
 	EOF
+	GIT_PROTOCOL=version=2 git upload-pack . <input >/dev/null
 	)
 '
 
@@ -902,6 +929,13 @@ test_expect_success 'fetch exclude tag one' '
 	git -C shallow12 log --pretty=tformat:%s origin/main >actual &&
 	test_write_lines three two >expected &&
 	test_cmp expected actual
+'
+
+test_expect_success 'fetch exclude tag one as revision' '
+	test_when_finished rm -f rev err &&
+	git -C shallow-exclude rev-parse one >rev &&
+	test_must_fail git -C shallow12 fetch --shallow-exclude $(cat rev) origin 2>err &&
+	test_grep "deepen-not is not a ref:" err
 '
 
 test_expect_success 'fetching deepen' '
@@ -927,7 +961,31 @@ test_expect_success 'fetching deepen' '
 	)
 '
 
-test_expect_success 'use ref advertisement to prune "have" lines sent' '
+test_expect_success 'fetching deepen beyond merged branch' '
+	test_create_repo shallow-deepen-merged &&
+	(
+		cd shallow-deepen-merged &&
+		git commit --allow-empty -m one &&
+		git commit --allow-empty -m two &&
+		git commit --allow-empty -m three &&
+		git switch -c branch &&
+		git commit --allow-empty -m four &&
+		git commit --allow-empty -m five &&
+		git switch main &&
+		git merge --no-ff branch &&
+		cd - &&
+		git clone --bare --depth 3 "file://$(pwd)/shallow-deepen-merged" deepen.git &&
+		git -C deepen.git fetch origin --deepen=1 &&
+		git -C deepen.git rev-list --all >actual &&
+		for commit in $(sed "/^$/d" deepen.git/shallow)
+		do
+			test_grep "$commit" actual || exit 1
+		done
+	)
+'
+
+test_negotiation_algorithm_default () {
+	test_when_finished rm -rf clientv0 clientv2 &&
 	rm -rf server client &&
 	git init server &&
 	test_commit -C server both_have_1 &&
@@ -946,7 +1004,7 @@ test_expect_success 'use ref advertisement to prune "have" lines sent' '
 	rm -f trace &&
 	cp -r client clientv0 &&
 	GIT_TRACE_PACKET="$(pwd)/trace" git -C clientv0 \
-		fetch origin server_has both_have_2 &&
+		"$@" fetch origin server_has both_have_2 &&
 	grep "have $(git -C client rev-parse client_has)" trace &&
 	grep "have $(git -C client rev-parse both_have_2)" trace &&
 	! grep "have $(git -C client rev-parse both_have_2^)" trace &&
@@ -954,10 +1012,37 @@ test_expect_success 'use ref advertisement to prune "have" lines sent' '
 	rm -f trace &&
 	cp -r client clientv2 &&
 	GIT_TRACE_PACKET="$(pwd)/trace" git -C clientv2 -c protocol.version=2 \
-		fetch origin server_has both_have_2 &&
+		"$@" fetch origin server_has both_have_2 &&
 	grep "have $(git -C client rev-parse client_has)" trace &&
 	grep "have $(git -C client rev-parse both_have_2)" trace &&
 	! grep "have $(git -C client rev-parse both_have_2^)" trace
+}
+
+test_expect_success 'use ref advertisement to prune "have" lines sent' '
+	test_negotiation_algorithm_default
+'
+
+test_expect_success 'same as last but with config overrides' '
+	test_negotiation_algorithm_default \
+		-c feature.experimental=true \
+		-c fetch.negotiationAlgorithm=consecutive
+'
+
+test_expect_success 'ensure bogus fetch.negotiationAlgorithm yields error' '
+	test_when_finished rm -rf clientv0 &&
+	cp -r client clientv0 &&
+	test_must_fail git -C clientv0 --fetch.negotiationAlgorithm=bogus \
+		       fetch origin server_has both_have_2
+'
+
+test_expect_success 'fetch-pack with fsckObjects and keep-file does not segfault' '
+	rm -rf server client &&
+	test_create_repo server &&
+	test_commit -C server one &&
+
+	test_create_repo client &&
+	git -c fetch.fsckObjects=true \
+	    -C client fetch-pack -k -k ../server HEAD
 '
 
 test_expect_success 'filtering by size' '
@@ -967,13 +1052,16 @@ test_expect_success 'filtering by size' '
 	test_config -C server uploadpack.allowfilter 1 &&
 
 	test_create_repo client &&
-	git -C client fetch-pack --filter=blob:limit=0 ../server HEAD &&
+	GIT_TRACE2_EVENT=$(pwd)/client/trace2_event \
+		git -C client fetch-pack --filter=blob:limit=0 ../server HEAD &&
 
 	# Ensure that object is not inadvertently fetched
 	commit=$(git -C server rev-parse HEAD) &&
 	blob=$(git hash-object server/one.t) &&
 	git -C client rev-list --objects --missing=allow-any "$commit" >oids &&
-	! grep "$blob" oids
+	test_grep ! "$blob" oids &&
+
+	test_grep \"fetch-info\".*\"filter\":\"blob:limit\" client/trace2_event
 '
 
 test_expect_success 'filtering by size has no effect if support for it is not advertised' '
@@ -988,9 +1076,9 @@ test_expect_success 'filtering by size has no effect if support for it is not ad
 	commit=$(git -C server rev-parse HEAD) &&
 	blob=$(git hash-object server/one.t) &&
 	git -C client rev-list --objects --missing=allow-any "$commit" >oids &&
-	grep "$blob" oids &&
+	test_grep "$blob" oids &&
 
-	test_i18ngrep "filtering not recognized by server" err
+	test_grep "filtering not recognized by server" err
 '
 
 fetch_filter_blob_limit_zero () {
@@ -1010,7 +1098,7 @@ fetch_filter_blob_limit_zero () {
 
 	# Ensure that commit is fetched, but blob is not
 	commit=$(git -C "$SERVER" rev-parse two) &&
-	blob=$(git hash-object server/two.t) &&
+	blob=$(git hash-object "$SERVER/two.t") &&
 	git -C client rev-list --objects --missing=allow-any "$commit" >oids &&
 	grep "$commit" oids &&
 	! grep "$blob" oids

@@ -29,8 +29,8 @@ test_expect_success 'merge c1 with c2, c3, c4, ... c29' '
 	refs="" &&
 	while test $i -le 30
 	do
-		refs="$refs c$i"
-		i=$(expr $i + 1)
+		refs="$refs c$i" &&
+		i=$(expr $i + 1) || return 1
 	done &&
 	git merge $refs &&
 	test "$(git rev-parse c1)" != "$(git rev-parse HEAD)" &&
@@ -77,12 +77,9 @@ Merge made by the 'recursive' strategy.
 EOF
 
 test_expect_success 'merge reduces irrelevant remote heads' '
-	if test "$GIT_TEST_MERGE_ALGORITHM" = ort
-	then
-		mv expected expected.tmp &&
-		sed s/recursive/ort/ expected.tmp >expected &&
-		rm expected.tmp
-	fi &&
+	mv expected expected.tmp &&
+	sed s/recursive/ort/ expected.tmp >expected &&
+	rm expected.tmp &&
 	GIT_MERGE_VERBOSITY=0 git merge c4 c5 >actual &&
 	test_cmp expected actual
 '

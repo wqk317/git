@@ -13,7 +13,7 @@ void *git_mmap(void *start, size_t length, int prot, int flags, int fd, off_t of
 	}
 
 	start = malloc(length);
-	if (start == NULL) {
+	if (!start) {
 		errno = ENOMEM;
 		return MAP_FAILED;
 	}
@@ -38,7 +38,7 @@ void *git_mmap(void *start, size_t length, int prot, int flags, int fd, off_t of
 	return start;
 }
 
-int git_munmap(void *start, size_t length)
+int git_munmap(void *start, size_t length UNUSED)
 {
 	free(start);
 	return 0;

@@ -43,7 +43,7 @@ extern "C" {
 
 #define XDF_PATIENCE_DIFF (1 << 14)
 #define XDF_HISTOGRAM_DIFF (1 << 15)
-#define XDF_DIFF_ALGORITHM_MASK (XDF_PATIENCE_DIFF | XDF_HISTOGRAM_DIFF)
+#define XDF_DIFF_ALGORITHM_MASK (XDF_PATIENCE_DIFF | XDF_HISTOGRAM_DIFF | XDF_NEED_MINIMAL)
 #define XDF_DIFF_ALG(x) ((x) & XDF_DIFF_ALGORITHM_MASK)
 
 #define XDF_INDENT_HEURISTIC (1 << 23)
@@ -66,6 +66,7 @@ extern "C" {
 
 /* merge output styles */
 #define XDL_MERGE_DIFF3 1
+#define XDL_MERGE_ZEALOUS_DIFF3 2
 
 typedef struct s_mmfile {
 	char *ptr;
@@ -84,7 +85,7 @@ typedef struct s_xpparam {
 	regex_t **ignore_regex;
 	size_t ignore_regex_nr;
 
-	/* See Documentation/diff-options.txt. */
+	/* See Documentation/diff-options.adoc. */
 	char **anchors;
 	size_t anchors_nr;
 } xpparam_t;
@@ -119,6 +120,7 @@ typedef struct s_bdiffparam {
 
 
 #define xdl_malloc(x) xmalloc(x)
+#define xdl_calloc(n, sz) xcalloc(n, sz)
 #define xdl_free(ptr) free(ptr)
 #define xdl_realloc(ptr,x) xrealloc(ptr,x)
 

@@ -18,6 +18,12 @@ then
 	test_done
 fi
 
+if test_have_prereq !REFFILES
+then
+	skip_all='skipping test; dumb HTTP protocol not supported with reftable.'
+	test_done
+fi
+
 LIB_HTTPD_DAV=t
 . "$TEST_DIRECTORY"/lib-httpd.sh
 ROOT_PATH="$PWD"
@@ -36,7 +42,9 @@ test_expect_success 'setup remote repository' '
 	git clone --bare test_repo test_repo.git &&
 	cd test_repo.git &&
 	git --bare update-server-info &&
-	mv hooks/post-update.sample hooks/post-update &&
+	test_hook --setup post-update <<-\EOF &&
+	exec git update-server-info
+	EOF
 	ORIG_HEAD=$(git rev-parse --verify HEAD) &&
 	cd - &&
 	mv test_repo.git "$HTTPD_DOCUMENT_ROOT_PATH"
@@ -187,6 +195,16 @@ test_expect_failure 'push to password-protected repository (no user in URL)' '
 	set_askpass user@host pass@host &&
 	git push "$HTTPD_URL/auth/dumb/test_repo.git" HEAD &&
 	expect_askpass both user@host &&
+	git rev-parse --verify HEAD >expect &&
+	git --git-dir="$HTTPD_DOCUMENT_ROOT_PATH/auth/dumb/test_repo.git" \
+		rev-parse --verify HEAD >actual &&
+	test_cmp expect actual
+'
+
+test_expect_success 'push to password-protected repository (netrc)' '
+	test_commit pw-netrc &&
+	echo "default login user@host password pass@host" >"$HOME/.netrc" &&
+	GIT_TRACE=1 GIT_CURL_VERBOSE=1 git push "$HTTPD_URL/auth/dumb/test_repo.git" HEAD &&
 	git rev-parse --verify HEAD >expect &&
 	git --git-dir="$HTTPD_DOCUMENT_ROOT_PATH/auth/dumb/test_repo.git" \
 		rev-parse --verify HEAD >actual &&

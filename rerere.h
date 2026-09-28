@@ -1,6 +1,7 @@
 #ifndef RERERE_H
 #define RERERE_H
 
+#include "gettext.h"
 #include "string-list.h"
 
 struct pathspec;
@@ -24,9 +25,6 @@ struct rerere_id {
 };
 
 int setup_rerere(struct repository *,struct string_list *, int);
-#ifndef NO_THE_REPOSITORY_COMPATIBILITY_MACROS
-#define rerere(flags) repo_rerere(the_repository, flags)
-#endif
 int repo_rerere(struct repository *, int);
 /*
  * Given the conflict ID and the name of a "file" used for replaying
@@ -34,11 +32,18 @@ int repo_rerere(struct repository *, int);
  * path to that filesystem entity.  With "file" specified with NULL,
  * return the path to the directory that houses these files.
  */
-const char *rerere_path(const struct rerere_id *, const char *file);
+const char *rerere_path(struct strbuf *buf, const struct rerere_id *,
+			const char *file);
 int rerere_forget(struct repository *, struct pathspec *);
 int rerere_remaining(struct repository *, struct string_list *);
 void rerere_clear(struct repository *, struct string_list *);
 void rerere_gc(struct repository *, struct string_list *);
+
+/*
+ * Check whether garbage collection for rerere entries is needed, which is
+ * the case when there's at least `limit` stale entries that would be pruned.
+ */
+bool rerere_gc_needed(struct repository *r, size_t limit);
 
 #define OPT_RERERE_AUTOUPDATE(v) OPT_UYN(0, "rerere-autoupdate", (v), \
 	N_("update the index with reused conflict resolution if possible"))

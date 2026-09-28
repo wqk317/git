@@ -1,13 +1,18 @@
-#include "cache.h"
-#include "diff.h"
-#include "diffcore.h"
+#define USE_THE_REPOSITORY_VARIABLE
+
+#include "git-compat-util.h"
+#include "gettext.h"
+#include "hash.h"
+#include "hex.h"
 #include "lockfile.h"
+#include "merge.h"
 #include "commit.h"
+#include "repository.h"
 #include "run-command.h"
 #include "resolve-undo.h"
+#include "tree.h"
 #include "tree-walk.h"
 #include "unpack-trees.h"
-#include "dir.h"
 
 static const char *merge_argument(struct commit *commit)
 {
@@ -19,22 +24,22 @@ int try_merge_command(struct repository *r,
 		      const char **xopts, struct commit_list *common,
 		      const char *head_arg, struct commit_list *remotes)
 {
-	struct strvec args = STRVEC_INIT;
-	int i, ret;
+	struct child_process cmd = CHILD_PROCESS_INIT;
+	int ret;
 	struct commit_list *j;
 
-	strvec_pushf(&args, "merge-%s", strategy);
-	for (i = 0; i < xopts_nr; i++)
-		strvec_pushf(&args, "--%s", xopts[i]);
+	strvec_pushf(&cmd.args, "merge-%s", strategy);
+	for (size_t i = 0; i < xopts_nr; i++)
+		strvec_pushf(&cmd.args, "--%s", xopts[i]);
 	for (j = common; j; j = j->next)
-		strvec_push(&args, merge_argument(j->item));
-	strvec_push(&args, "--");
-	strvec_push(&args, head_arg);
+		strvec_push(&cmd.args, merge_argument(j->item));
+	strvec_push(&cmd.args, "--");
+	strvec_push(&cmd.args, head_arg);
 	for (j = remotes; j; j = j->next)
-		strvec_push(&args, merge_argument(j->item));
+		strvec_push(&cmd.args, merge_argument(j->item));
 
-	ret = run_command_v_opt(args.v, RUN_GIT_CMD);
-	strvec_clear(&args);
+	cmd.git_cmd = 1;
+	ret = run_command(&cmd);
 
 	discard_index(r->index);
 	if (repo_read_index(r) < 0)
@@ -63,19 +68,23 @@ int checkout_fast_forward(struct repository *r,
 	memset(&trees, 0, sizeof(trees));
 	memset(&t, 0, sizeof(t));
 
-	trees[nr_trees] = parse_tree_indirect(head);
+	trees[nr_trees] = repo_parse_tree_indirect(the_repository, head);
 	if (!trees[nr_trees++]) {
 		rollback_lock_file(&lock_file);
 		return -1;
 	}
-	trees[nr_trees] = parse_tree_indirect(remote);
+	trees[nr_trees] = repo_parse_tree_indirect(the_repository, remote);
 	if (!trees[nr_trees++]) {
 		rollback_lock_file(&lock_file);
 		return -1;
 	}
 	for (i = 0; i < nr_trees; i++) {
-		parse_tree(trees[i]);
-		init_tree_desc(t+i, trees[i]->buffer, trees[i]->size);
+		if (repo_parse_tree(the_repository, trees[i]) < 0) {
+			rollback_lock_file(&lock_file);
+			return -1;
+		}
+		init_tree_desc(t+i, &trees[i]->object.oid,
+			       trees[i]->buffer, trees[i]->size);
 	}
 
 	memset(&opts, 0, sizeof(opts));

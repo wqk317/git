@@ -31,54 +31,81 @@ test_expect_success 'nonexistent template file should return error' '
 	echo changes >> foo &&
 	git add foo &&
 	(
+		GIT_EDITOR="echo hello >" &&
+		export GIT_EDITOR &&
+		test_must_fail git commit --template "$(pwd)"/notexist
+	)
+'
+
+test_expect_success 'nonexistent optional template file on command line' '
+	echo changes >> foo &&
+	git add foo &&
+	(
 		GIT_EDITOR="echo hello >\"\$1\"" &&
 		export GIT_EDITOR &&
-		test_must_fail git commit --template "$PWD"/notexist
+		git commit --template ":(optional)$(pwd)/notexist"
 	)
 '
 
 test_expect_success 'nonexistent template file in config should return error' '
-	test_config commit.template "$PWD"/notexist &&
+	test_config commit.template "$(pwd)"/notexist &&
 	(
-		GIT_EDITOR="echo hello >\"\$1\"" &&
+		GIT_EDITOR="echo hello >" &&
 		export GIT_EDITOR &&
-		test_must_fail git commit
+		test_must_fail git commit --allow-empty
 	)
 '
 
+test_expect_success 'nonexistent optional template file in config' '
+	test_config commit.template ":(optional)$(pwd)"/notexist &&
+	GIT_EDITOR="echo hello >" git commit --allow-empty &&
+	commit_body HEAD >actual &&
+	echo hello >expect &&
+	test_cmp expect actual
+'
+
 # From now on we'll use a template file that exists.
-TEMPLATE="$PWD"/template
+TEMPLATE="$(pwd)"/template
 
 test_expect_success 'unedited template should not commit' '
-	echo "template line" > "$TEMPLATE" &&
-	test_must_fail git commit --template "$TEMPLATE"
+	echo "template line" >"$TEMPLATE" &&
+	test_must_fail git commit --allow-empty --template "$TEMPLATE"
 '
 
 test_expect_success 'unedited template with comments should not commit' '
-	echo "# comment in template" >> "$TEMPLATE" &&
-	test_must_fail git commit --template "$TEMPLATE"
+	echo "# comment in template" >>"$TEMPLATE" &&
+	test_must_fail git commit --allow-empty --template "$TEMPLATE"
 '
 
 test_expect_success 'a Signed-off-by line by itself should not commit' '
 	(
 		test_set_editor "$TEST_DIRECTORY"/t7500/add-signed-off &&
-		test_must_fail git commit --template "$TEMPLATE"
+		test_must_fail git commit --allow-empty --template "$TEMPLATE"
 	)
 '
 
 test_expect_success 'adding comments to a template should not commit' '
 	(
 		test_set_editor "$TEST_DIRECTORY"/t7500/add-comments &&
-		test_must_fail git commit --template "$TEMPLATE"
+		test_must_fail git commit --allow-empty --template "$TEMPLATE"
 	)
 '
 
 test_expect_success 'adding real content to a template should commit' '
 	(
 		test_set_editor "$TEST_DIRECTORY"/t7500/add-content &&
-		git commit --template "$TEMPLATE"
+		git commit --allow-empty --template "$TEMPLATE"
 	) &&
 	commit_msg_is "template linecommit message"
+'
+
+test_expect_success 'existent template marked optional should commit' '
+	echo "existent template" >"$TEMPLATE" &&
+	(
+		test_set_editor "$TEST_DIRECTORY"/t7500/add-content &&
+		git commit --allow-empty --template ":(optional)$TEMPLATE"
+	) &&
+	commit_msg_is "existent templatecommit message"
 '
 
 test_expect_success '-t option should be short for --template' '
@@ -177,7 +204,7 @@ EOF
 test_expect_success '--signoff' '
 	echo "yet another content *narf*" >> foo &&
 	echo "zort" | git commit -s -F - foo &&
-	git cat-file commit HEAD | sed "1,/^\$/d" > output &&
+	commit_body HEAD >output &&
 	test_cmp expect output
 '
 
@@ -359,14 +386,14 @@ test_expect_success '--fixup=reword: ignores staged changes' '
 
 test_expect_success '--fixup=reword: error out with -m option' '
 	commit_for_rebase_autosquash_setup &&
-	echo "fatal: cannot combine -m with --fixup:reword" >expect &&
+	echo "fatal: options '\''-m'\'' and '\''--fixup:reword'\'' cannot be used together" >expect &&
 	test_must_fail git commit --fixup=reword:HEAD~ -m "reword commit message" 2>actual &&
 	test_cmp expect actual
 '
 
 test_expect_success '--fixup=amend: error out with -m option' '
 	commit_for_rebase_autosquash_setup &&
-	echo "fatal: cannot combine -m with --fixup:amend" >expect &&
+	echo "fatal: options '\''-m'\'' and '\''--fixup:amend'\'' cannot be used together" >expect &&
 	test_must_fail git commit --fixup=amend:HEAD~ -m "amend commit message" 2>actual &&
 	test_cmp expect actual
 '
@@ -421,8 +448,9 @@ test_expect_success 'amend! commit allows empty commit msg body with --allow-emp
 
 test_fixup_reword_opt () {
 	test_expect_success "--fixup=reword: incompatible with $1" "
-		echo 'fatal: reword option of --fixup is mutually exclusive with'\
-			'--patch/--interactive/--all/--include/--only' >expect &&
+		echo 'fatal: reword option of '\''--fixup'\'' and' \
+			''\''--patch/--interactive/--all/--include/--only'\' \
+			'cannot be used together' >expect &&
 		test_must_fail git commit --fixup=reword:HEAD~ $1 2>actual &&
 		test_cmp expect actual
 	"
@@ -435,13 +463,13 @@ done
 
 test_expect_success '--fixup=reword: give error with pathsec' '
 	commit_for_rebase_autosquash_setup &&
-	echo "fatal: cannot combine reword option of --fixup with path '\''foo'\''" >expect &&
+	echo "fatal: reword option of '\''--fixup'\'' and path '\''foo'\'' cannot be used together" >expect &&
 	test_must_fail git commit --fixup=reword:HEAD~ -- foo 2>actual &&
 	test_cmp expect actual
 '
 
 test_expect_success '--fixup=reword: -F give error message' '
-	echo "fatal: Only one of -c/-C/-F/--fixup can be used." >expect &&
+	echo "fatal: options '\''-F'\'' and '\''--fixup'\'' cannot be used together" >expect &&
 	test_must_fail git commit --fixup=reword:HEAD~ -F msg  2>actual &&
 	test_cmp expect actual
 '
@@ -554,7 +582,7 @@ test_expect_success 'commit without staging files fails and displays hints' '
 	git commit -m initial &&
 	echo "changes" >>file &&
 	test_must_fail git commit -m update >actual &&
-	test_i18ngrep "no changes added to commit (use \"git add\" and/or \"git commit -a\")" actual
+	test_grep "no changes added to commit (use \"git add\" and/or \"git commit -a\")" actual
 '
 
 test_done

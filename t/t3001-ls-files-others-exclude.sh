@@ -8,7 +8,6 @@ test_description='git ls-files --others --exclude
 This test runs git ls-files --others and tests --exclude patterns.
 '
 
-TEST_PASSES_SANITIZE_LEAK=true
 . ./test-lib.sh
 
 rm -fr one three
@@ -67,26 +66,28 @@ echo '!*.2
 
 allignores='.gitignore one/.gitignore one/two/.gitignore'
 
-test_expect_success \
-    'git ls-files --others with various exclude options.' \
-    'git ls-files --others \
+test_expect_success 'git ls-files --others with various exclude options.' '
+	git ls-files --others \
        --exclude=\*.6 \
        --exclude-per-directory=.gitignore \
        --exclude-from=.git/ignore \
-       >output &&
-     test_cmp expect output'
+	>output &&
+	test_filter_gitconfig output &&
+	test_cmp expect output
+'
 
 # Test \r\n (MSDOS-like systems)
 printf '*.1\r\n/*.3\r\n!*.6\r\n' >.gitignore
 
-test_expect_success \
-    'git ls-files --others with \r\n line endings.' \
-    'git ls-files --others \
+test_expect_success 'git ls-files --others with \r\n line endings.' '
+	git ls-files --others \
        --exclude=\*.6 \
        --exclude-per-directory=.gitignore \
        --exclude-from=.git/ignore \
-       >output &&
-     test_cmp expect output'
+	>output &&
+	test_filter_gitconfig output &&
+	test_cmp expect output
+'
 
 test_expect_success 'setup skip-worktree gitignore' '
 	git add $allignores &&
@@ -94,16 +95,17 @@ test_expect_success 'setup skip-worktree gitignore' '
 	rm $allignores
 '
 
-test_expect_success \
-    'git ls-files --others with various exclude options.' \
-    'git ls-files --others \
+test_expect_success 'git ls-files --others with various exclude options.' '
+	git ls-files --others \
        --exclude=\*.6 \
        --exclude-per-directory=.gitignore \
        --exclude-from=.git/ignore \
-       >output &&
-     test_cmp expect output'
+	>output &&
+	test_filter_gitconfig output &&
+	test_cmp expect output
+'
 
-test_expect_success !SANITIZE_LEAK 'restore gitignore' '
+test_expect_success 'restore gitignore' '
 	git checkout --ignore-skip-worktree-bits $allignores &&
 	rm .git/index
 '
@@ -126,7 +128,7 @@ cat > expect << EOF
 #	three/
 EOF
 
-test_expect_success !SANITIZE_LEAK 'git status honors core.excludesfile' \
+test_expect_success 'git status honors core.excludesfile' \
 	'test_cmp expect output'
 
 test_expect_success 'trailing slash in exclude allows directory match(1)' '
@@ -159,21 +161,21 @@ test_expect_success 'trailing slash in exclude forces directory match (1)' '
 
 	>two &&
 	git ls-files --others --exclude=two/ >output &&
-	grep "^two" output
+	test_grep "^two" output
 
 '
 
 test_expect_success 'trailing slash in exclude forces directory match (2)' '
 
 	git ls-files --others --exclude=one/a.1/ >output &&
-	grep "^one/a.1" output
+	test_grep "^one/a.1" output
 
 '
 
 test_expect_success 'negated exclude matches can override previous ones' '
 
 	git ls-files --others --exclude="a.*" --exclude="!a.1" >output &&
-	grep "^a.1" output
+	test_grep "^a.1" output
 '
 
 test_expect_success 'excluded directory overrides content patterns' '
@@ -283,12 +285,12 @@ test_expect_success 'pattern matches prefix completely' '
 '
 
 test_expect_success 'ls-files with "**" patterns' '
-	cat <<\EOF >expect &&
-a.1
-one/a.1
-one/two/a.1
-three/a.1
-EOF
+	cat <<-\EOF >expect &&
+	a.1
+	one/a.1
+	one/two/a.1
+	three/a.1
+	EOF
 	git ls-files -o -i --exclude "**/a.1" >actual &&
 	test_cmp expect actual
 '

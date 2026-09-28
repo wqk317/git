@@ -1,4 +1,9 @@
-#include "cache.h"
+#define DISABLE_SIGN_COMPARE_WARNINGS
+
+#include "git-compat-util.h"
+#include "gettext.h"
+#include "setup.h"
+#include "symlinks.h"
 
 static int threaded_check_leading_path(struct cache_def *cache, const char *name,
 				       int len, int warn_on_lstat_err);
@@ -69,11 +74,12 @@ static inline void reset_lstat_cache(struct cache_def *cache)
  */
 static int lstat_cache_matchlen(struct cache_def *cache,
 				const char *name, int len,
-				int *ret_flags, int track_flags,
+				unsigned int *ret_flags, unsigned int track_flags,
 				int prefix_len_stat_func)
 {
 	int match_len, last_slash, last_slash_dir, previous_slash;
-	int save_flags, ret, saved_errno = 0;
+	unsigned int save_flags;
+	int ret, saved_errno = 0;
 	struct stat st;
 
 	if (cache->track_flags != track_flags ||
@@ -187,10 +193,10 @@ static int lstat_cache_matchlen(struct cache_def *cache,
 	return match_len;
 }
 
-static int lstat_cache(struct cache_def *cache, const char *name, int len,
-		       int track_flags, int prefix_len_stat_func)
+static unsigned int lstat_cache(struct cache_def *cache, const char *name, int len,
+		       unsigned int track_flags, int prefix_len_stat_func)
 {
-	int flags;
+	unsigned int flags;
 	(void)lstat_cache_matchlen(cache, name, len, &flags, track_flags,
 			prefix_len_stat_func);
 	return flags;
@@ -229,7 +235,7 @@ int check_leading_path(const char *name, int len, int warn_on_lstat_err)
 static int threaded_check_leading_path(struct cache_def *cache, const char *name,
 				       int len, int warn_on_lstat_err)
 {
-	int flags;
+	unsigned int flags;
 	int match_len = lstat_cache_matchlen(cache, name, len, &flags,
 			   FL_SYMLINK|FL_NOENT|FL_DIR, USE_ONLY_LSTAT);
 	int saved_errno = errno;
@@ -279,7 +285,9 @@ static void do_remove_scheduled_dirs(int new_len)
 {
 	while (removal.len > new_len) {
 		removal.buf[removal.len] = '\0';
-		if (rmdir(removal.buf))
+		if ((startup_info->original_cwd &&
+		     !strcmp(removal.buf, startup_info->original_cwd)) ||
+		    rmdir(removal.buf))
 			break;
 		do {
 			removal.len--;
@@ -292,6 +300,10 @@ static void do_remove_scheduled_dirs(int new_len)
 void schedule_dir_for_removal(const char *name, int len)
 {
 	int match_len, last_slash, i, previous_slash;
+
+	if (startup_info->original_cwd &&
+	    !strcmp(name, startup_info->original_cwd))
+		return;	/* Do not remove the current working directory */
 
 	match_len = last_slash = i =
 		longest_path_match(name, len, removal.buf, removal.len,

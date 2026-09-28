@@ -4,6 +4,7 @@
 #
 
 test_description='Test the update hook infrastructure.'
+
 . ./test-lib.sh
 
 test_expect_success setup '
@@ -20,45 +21,37 @@ test_expect_success setup '
 	git clone --bare ./. victim.git &&
 	GIT_DIR=victim.git git update-ref refs/heads/tofail $commit1 &&
 	git update-ref refs/heads/main $commit1 &&
-	git update-ref refs/heads/tofail $commit0
+	git update-ref refs/heads/tofail $commit0 &&
+
+	test_hook --setup -C victim.git pre-receive <<-\EOF &&
+	printf %s "$@" >>$GIT_DIR/pre-receive.args
+	cat - >$GIT_DIR/pre-receive.stdin
+	echo STDOUT pre-receive
+	echo STDERR pre-receive >&2
+	EOF
+
+	test_hook --setup -C victim.git update <<-\EOF &&
+	echo "$@" >>$GIT_DIR/update.args
+	read x; printf %s "$x" >$GIT_DIR/update.stdin
+	echo STDOUT update $1
+	echo STDERR update $1 >&2
+	test "$1" = refs/heads/main || exit
+	EOF
+
+	test_hook --setup -C victim.git post-receive <<-\EOF &&
+	printf %s "$@" >>$GIT_DIR/post-receive.args
+	cat - >$GIT_DIR/post-receive.stdin
+	echo STDOUT post-receive
+	echo STDERR post-receive >&2
+	EOF
+
+	test_hook --setup -C victim.git post-update <<-\EOF
+	echo "$@" >>$GIT_DIR/post-update.args
+	read x; printf %s "$x" >$GIT_DIR/post-update.stdin
+	echo STDOUT post-update
+	echo STDERR post-update >&2
+	EOF
 '
-
-cat >victim.git/hooks/pre-receive <<'EOF'
-#!/bin/sh
-printf %s "$@" >>$GIT_DIR/pre-receive.args
-cat - >$GIT_DIR/pre-receive.stdin
-echo STDOUT pre-receive
-echo STDERR pre-receive >&2
-EOF
-chmod u+x victim.git/hooks/pre-receive
-
-cat >victim.git/hooks/update <<'EOF'
-#!/bin/sh
-echo "$@" >>$GIT_DIR/update.args
-read x; printf %s "$x" >$GIT_DIR/update.stdin
-echo STDOUT update $1
-echo STDERR update $1 >&2
-test "$1" = refs/heads/main || exit
-EOF
-chmod u+x victim.git/hooks/update
-
-cat >victim.git/hooks/post-receive <<'EOF'
-#!/bin/sh
-printf %s "$@" >>$GIT_DIR/post-receive.args
-cat - >$GIT_DIR/post-receive.stdin
-echo STDOUT post-receive
-echo STDERR post-receive >&2
-EOF
-chmod u+x victim.git/hooks/post-receive
-
-cat >victim.git/hooks/post-update <<'EOF'
-#!/bin/sh
-echo "$@" >>$GIT_DIR/post-update.args
-read x; printf %s "$x" >$GIT_DIR/post-update.stdin
-echo STDOUT post-update
-echo STDERR post-update >&2
-EOF
-chmod u+x victim.git/hooks/post-update
 
 test_expect_success push '
 	test_must_fail git send-pack --force ./victim.git \
@@ -71,14 +64,14 @@ test_expect_success 'updated as expected' '
 '
 
 test_expect_success 'hooks ran' '
-	test -f victim.git/pre-receive.args &&
-	test -f victim.git/pre-receive.stdin &&
-	test -f victim.git/update.args &&
-	test -f victim.git/update.stdin &&
-	test -f victim.git/post-receive.args &&
-	test -f victim.git/post-receive.stdin &&
-	test -f victim.git/post-update.args &&
-	test -f victim.git/post-update.stdin
+	test_path_is_file victim.git/pre-receive.args &&
+	test_path_is_file victim.git/pre-receive.stdin &&
+	test_path_is_file victim.git/update.args &&
+	test_path_is_file victim.git/update.stdin &&
+	test_path_is_file victim.git/post-receive.args &&
+	test_path_is_file victim.git/post-receive.stdin &&
+	test_path_is_file victim.git/post-update.args &&
+	test_path_is_file victim.git/post-update.stdin
 '
 
 test_expect_success 'pre-receive hook input' '
@@ -131,20 +124,18 @@ remote: STDOUT post-update
 remote: STDERR post-update
 EOF
 test_expect_success 'send-pack stderr contains hook messages' '
-	grep ^remote: send.err | sed "s/ *\$//" >actual &&
+	sed -n "/^remote:/s/ *\$//p" send.err >actual &&
 	test_cmp expect actual
 '
 
 test_expect_success 'pre-receive hook that forgets to read its input' '
-	write_script victim.git/hooks/pre-receive <<-\EOF &&
+	test_hook --clobber -C victim.git pre-receive <<-\EOF &&
 	exit 0
 	EOF
 	rm -f victim.git/hooks/update victim.git/hooks/post-update &&
 
-	for v in $(test_seq 100 999)
-	do
-		git branch branch_$v main || return
-	done &&
+	test_seq -f "create refs/heads/branch_%d main" 100 999 |
+	git update-ref --stdin &&
 	git push ./victim.git "+refs/heads/*:refs/heads/*"
 '
 

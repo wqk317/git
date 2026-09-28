@@ -94,7 +94,7 @@ AC_DEFUN([GIT_PARSE_WITH_SET_MAKE_VAR],
 [AC_ARG_WITH([$1],
  [AS_HELP_STRING([--with-$1=VALUE], $3)],
  if test -n "$withval"; then
-  if test "$withval" = "yes" -o "$withval" = "no"; then
+  if test "$withval" = "yes" || test "$withval" = "no"; then
     AC_MSG_WARN([You likely do not want either 'yes' or 'no' as]
 		     [a value for $1 ($2).  Maybe you do...?])
   fi
@@ -142,7 +142,7 @@ fi
 ## Configure body starts here.
 
 AC_PREREQ(2.59)
-AC_INIT([git], [@@GIT_VERSION@@], [git@vger.kernel.org])
+AC_INIT([git], [@GIT_VERSION@], [git@vger.kernel.org])
 
 AC_CONFIG_SRCDIR([git.c])
 
@@ -236,9 +236,6 @@ AC_MSG_NOTICE([CHECKS for site configuration])
 # Define NO_SVN_TESTS if you want to skip time-consuming SVN interoperability
 # tests.  These tests take up a significant amount of the total test time
 # but are not needed unless you plan to talk to SVN repos.
-#
-# Define PPC_SHA1 environment variable when running make to make use of
-# a bundled SHA1 routine optimized for PowerPC.
 #
 # Define NO_OPENSSL environment variable if you do not have OpenSSL.
 #
@@ -549,6 +546,8 @@ fi
 # git-http-push are not built, and you cannot use http:// and https://
 # transports.
 
+if test -z "$NO_CURL"; then
+
 GIT_STASH_FLAGS($CURLDIR)
 
 AC_CHECK_LIB([curl], [curl_global_init],
@@ -556,6 +555,8 @@ AC_CHECK_LIB([curl], [curl_global_init],
 [NO_CURL=YesPlease])
 
 GIT_UNSTASH_FLAGS($CURLDIR)
+
+fi
 
 GIT_CONF_SUBST([NO_CURL])
 
@@ -584,6 +585,8 @@ fi
 # Define NO_EXPAT if you do not have expat installed.  git-http-push is
 # not built, and you cannot push using http:// and https:// transports.
 
+if test -z "$NO_EXPAT"; then
+
 GIT_STASH_FLAGS($EXPATDIR)
 
 AC_CHECK_LIB([expat], [XML_ParserCreate],
@@ -591,6 +594,8 @@ AC_CHECK_LIB([expat], [XML_ParserCreate],
 [NO_EXPAT=YesPlease])
 
 GIT_UNSTASH_FLAGS($EXPATDIR)
+
+fi
 
 GIT_CONF_SUBST([NO_EXPAT])
 
@@ -639,13 +644,14 @@ LIBS="$old_LIBS"
 GIT_UNSTASH_FLAGS($ICONVDIR)
 
 GIT_CONF_SUBST([NEEDS_LIBICONV])
-GIT_CONF_SUBST([NO_ICONV])
 
 if test -n "$NO_ICONV"; then
     NEEDS_LIBICONV=
 fi
 
 fi
+
+GIT_CONF_SUBST([NO_ICONV])
 
 #
 # Define NO_DEFLATE_BOUND if deflateBound is missing from zlib.
@@ -1060,6 +1066,7 @@ AC_CHECK_LIB([iconv], [locale_charset],
        [AC_CHECK_LIB([charset], [locale_charset],
                      [CHARSET_LIB=-lcharset])])
 GIT_CONF_SUBST([CHARSET_LIB])
+
 #
 # Define HAVE_CLOCK_GETTIME=YesPlease if clock_gettime is available.
 GIT_CHECK_FUNC(clock_gettime,
@@ -1082,6 +1089,14 @@ AC_COMPILE_IFELSE([CLOCK_MONOTONIC_SRC],
 	[AC_MSG_RESULT([no])
 	HAVE_CLOCK_MONOTONIC=])
 GIT_CONF_SUBST([HAVE_CLOCK_MONOTONIC])
+
+#
+# Define HAVE_SYNC_FILE_RANGE=YesPlease if sync_file_range is available.
+GIT_CHECK_FUNC(sync_file_range,
+	[HAVE_SYNC_FILE_RANGE=YesPlease],
+	[HAVE_SYNC_FILE_RANGE=])
+GIT_CONF_SUBST([HAVE_SYNC_FILE_RANGE])
+
 #
 # Define NO_SETITIMER if you don't have setitimer.
 GIT_CHECK_FUNC(setitimer,
@@ -1106,14 +1121,6 @@ GIT_CHECK_FUNC(strlcpy,
 [NO_STRLCPY=],
 [NO_STRLCPY=YesPlease])
 GIT_CONF_SUBST([NO_STRLCPY])
-#
-# Define NO_UINTMAX_T if your platform does not have uintmax_t
-AC_CHECK_TYPE(uintmax_t,
-[NO_UINTMAX_T=],
-[NO_UINTMAX_T=YesPlease],[
-#include <inttypes.h>
-])
-GIT_CONF_SUBST([NO_UINTMAX_T])
 #
 # Define NO_STRTOUMAX if you don't have strtoumax in the C library.
 GIT_CHECK_FUNC(strtoumax,
@@ -1180,10 +1187,42 @@ AC_COMPILE_IFELSE([BSD_SYSCTL_SRC],
 	HAVE_BSD_SYSCTL=])
 GIT_CONF_SUBST([HAVE_BSD_SYSCTL])
 
-## Other checks.
-# Define USE_PIC if you need the main git objects to be built with -fPIC
-# in order to build and link perl/Git.so.  x86-64 seems to need this.
 #
+# Define HAVE_SYSINFO=YesPlease if sysinfo is available.
+#
+
+HAVE_SYSINFO=
+# on a *BSD system, sysctl() takes precedence over the
+# sysinfo() compatibility library (if installed).
+
+if test -z "$HAVE_BSD_SYSCTL"; then
+
+  AC_DEFUN([HAVE_SYSINFO_SRC], [
+  AC_LANG_PROGRAM([[
+  #include <stdint.h>
+  #include <sys/sysinfo.h>
+  ]], [[
+  struct sysinfo si;
+  uint64_t t = 0;
+  if (!sysinfo(&si)) {
+	t = si.totalram;
+	if (si.mem_unit > 1)
+		t *= (uint64_t)si.mem_unit;
+  }
+  return t;
+  ]])])
+
+  AC_MSG_CHECKING([for sysinfo])
+  AC_COMPILE_IFELSE([HAVE_SYSINFO_SRC],
+	[AC_MSG_RESULT([yes])
+	HAVE_SYSINFO=YesPlease],
+	[AC_MSG_RESULT([no])
+	HAVE_SYSINFO=])
+  GIT_CONF_SUBST([HAVE_SYSINFO])
+
+fi
+
+## Other checks.
 # Define NO_SYMLINK_HEAD if you never want .git/HEAD to be a symbolic link.
 # Enable it on Windows.  By default, symrefs are still used.
 #

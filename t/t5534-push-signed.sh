@@ -35,8 +35,7 @@ test_expect_success setup '
 
 test_expect_success 'unsigned push does not send push certificate' '
 	prepare_dst &&
-	mkdir -p dst/.git/hooks &&
-	write_script dst/.git/hooks/post-receive <<-\EOF &&
+	test_hook -C dst post-receive <<-\EOF &&
 	# discard the update list
 	cat >/dev/null
 	# record the push certificate
@@ -52,8 +51,7 @@ test_expect_success 'unsigned push does not send push certificate' '
 
 test_expect_success 'talking with a receiver without push certificate support' '
 	prepare_dst &&
-	mkdir -p dst/.git/hooks &&
-	write_script dst/.git/hooks/post-receive <<-\EOF &&
+	test_hook -C dst post-receive <<-\EOF &&
 	# discard the update list
 	cat >/dev/null
 	# record the push certificate
@@ -69,22 +67,19 @@ test_expect_success 'talking with a receiver without push certificate support' '
 
 test_expect_success 'push --signed fails with a receiver without push certificate support' '
 	prepare_dst &&
-	mkdir -p dst/.git/hooks &&
 	test_must_fail git push --signed dst noop ff +noff 2>err &&
-	test_i18ngrep "the receiving end does not support" err
+	test_grep "the receiving end does not support" err
 '
 
 test_expect_success 'push --signed=1 is accepted' '
 	prepare_dst &&
-	mkdir -p dst/.git/hooks &&
 	test_must_fail git push --signed=1 dst noop ff +noff 2>err &&
-	test_i18ngrep "the receiving end does not support" err
+	test_grep "the receiving end does not support" err
 '
 
 test_expect_success GPG 'no certificate for a signed push with no update' '
 	prepare_dst &&
-	mkdir -p dst/.git/hooks &&
-	write_script dst/.git/hooks/post-receive <<-\EOF &&
+	test_hook -C dst post-receive <<-\EOF &&
 	if test -n "${GIT_PUSH_CERT-}"
 	then
 		git cat-file blob $GIT_PUSH_CERT >../push-cert
@@ -96,9 +91,8 @@ test_expect_success GPG 'no certificate for a signed push with no update' '
 
 test_expect_success GPG 'signed push sends push certificate' '
 	prepare_dst &&
-	mkdir -p dst/.git/hooks &&
 	git -C dst config receive.certnonceseed sekrit &&
-	write_script dst/.git/hooks/post-receive <<-\EOF &&
+	test_hook -C dst post-receive <<-\EOF &&
 	# discard the update list
 	cat >/dev/null
 	# record the push certificate
@@ -132,17 +126,16 @@ test_expect_success GPG 'signed push sends push certificate' '
 	noop=$(git rev-parse noop) &&
 	ff=$(git rev-parse ff) &&
 	noff=$(git rev-parse noff) &&
-	grep "$noop $ff refs/heads/ff" dst/push-cert &&
-	grep "$noop $noff refs/heads/noff" dst/push-cert &&
+	test_grep "$noop $ff refs/heads/ff" dst/push-cert &&
+	test_grep "$noop $noff refs/heads/noff" dst/push-cert &&
 	test_cmp expect dst/push-cert-status
 '
 
 test_expect_success GPGSSH 'ssh signed push sends push certificate' '
 	prepare_dst &&
-	mkdir -p dst/.git/hooks &&
 	git -C dst config gpg.ssh.allowedSignersFile "${GPGSSH_ALLOWED_SIGNERS}" &&
 	git -C dst config receive.certnonceseed sekrit &&
-	write_script dst/.git/hooks/post-receive <<-\EOF &&
+	test_hook -C dst post-receive <<-\EOF &&
 	# discard the update list
 	cat >/dev/null
 	# record the push certificate
@@ -179,8 +172,8 @@ test_expect_success GPGSSH 'ssh signed push sends push certificate' '
 	noop=$(git rev-parse noop) &&
 	ff=$(git rev-parse ff) &&
 	noff=$(git rev-parse noff) &&
-	grep "$noop $ff refs/heads/ff" dst/push-cert &&
-	grep "$noop $noff refs/heads/noff" dst/push-cert &&
+	test_grep "$noop $ff refs/heads/ff" dst/push-cert &&
+	test_grep "$noop $noff refs/heads/noff" dst/push-cert &&
 	test_cmp expect dst/push-cert-status
 '
 
@@ -212,20 +205,19 @@ test_expect_success GPG 'inconsistent push options in signed push not allowed' '
 	# Tweak the push output to make the push option outside the cert
 	# different, then replay it on a fresh dst, checking that ff is not
 	# deleted.
-	perl -pe "s/([^ ])bar/\$1baz/" push >push.tweak &&
+	sed "s/\([^ ]\)bar/\1baz/" push >push.tweak &&
 	prepare_dst &&
 	git -C dst config receive.certnonceseed sekrit &&
 	git -C dst config receive.advertisepushoptions 1 &&
 	git receive-pack dst <push.tweak >out &&
 	git -C dst rev-parse ff &&
-	grep "inconsistent push options" out
+	test_grep "inconsistent push options" out
 '
 
 test_expect_success GPG 'fail without key and heed user.signingkey' '
 	prepare_dst &&
-	mkdir -p dst/.git/hooks &&
 	git -C dst config receive.certnonceseed sekrit &&
-	write_script dst/.git/hooks/post-receive <<-\EOF &&
+	test_hook -C dst post-receive <<-\EOF &&
 	# discard the update list
 	cat >/dev/null
 	# record the push certificate
@@ -265,17 +257,16 @@ test_expect_success GPG 'fail without key and heed user.signingkey' '
 	noop=$(git rev-parse noop) &&
 	ff=$(git rev-parse ff) &&
 	noff=$(git rev-parse noff) &&
-	grep "$noop $ff refs/heads/ff" dst/push-cert &&
-	grep "$noop $noff refs/heads/noff" dst/push-cert &&
+	test_grep "$noop $ff refs/heads/ff" dst/push-cert &&
+	test_grep "$noop $noff refs/heads/noff" dst/push-cert &&
 	test_cmp expect dst/push-cert-status
 '
 
 test_expect_success GPGSM 'fail without key and heed user.signingkey x509' '
 	test_config gpg.format x509 &&
 	prepare_dst &&
-	mkdir -p dst/.git/hooks &&
 	git -C dst config receive.certnonceseed sekrit &&
-	write_script dst/.git/hooks/post-receive <<-\EOF &&
+	test_hook -C dst post-receive <<-\EOF &&
 	# discard the update list
 	cat >/dev/null
 	# record the push certificate
@@ -312,24 +303,23 @@ test_expect_success GPGSM 'fail without key and heed user.signingkey x509' '
 		EOF
 		sed -n -e "s/^nonce /NONCE=/p" -e "/^$/q" dst/push-cert
 	) >expect.in &&
-	key=$(cat "${GNUPGHOME}/trustlist.txt" | cut -d" " -f1 | tr -d ":") &&
+	key=$(cut -d" " -f1 <"${GNUPGHOME}/trustlist.txt" | tr -d ":") &&
 	sed -e "s/^KEY=/KEY=${key}/" expect.in >expect &&
 
 	noop=$(git rev-parse noop) &&
 	ff=$(git rev-parse ff) &&
 	noff=$(git rev-parse noff) &&
-	grep "$noop $ff refs/heads/ff" dst/push-cert &&
-	grep "$noop $noff refs/heads/noff" dst/push-cert &&
+	test_grep "$noop $ff refs/heads/ff" dst/push-cert &&
+	test_grep "$noop $noff refs/heads/noff" dst/push-cert &&
 	test_cmp expect dst/push-cert-status
 '
 
 test_expect_success GPGSSH 'fail without key and heed user.signingkey ssh' '
 	test_config gpg.format ssh &&
 	prepare_dst &&
-	mkdir -p dst/.git/hooks &&
 	git -C dst config gpg.ssh.allowedSignersFile "${GPGSSH_ALLOWED_SIGNERS}" &&
 	git -C dst config receive.certnonceseed sekrit &&
-	write_script dst/.git/hooks/post-receive <<-\EOF &&
+	test_hook -C dst post-receive <<-\EOF &&
 	# discard the update list
 	cat >/dev/null
 	# record the push certificate
@@ -372,8 +362,8 @@ test_expect_success GPGSSH 'fail without key and heed user.signingkey ssh' '
 	noop=$(git rev-parse noop) &&
 	ff=$(git rev-parse ff) &&
 	noff=$(git rev-parse noff) &&
-	grep "$noop $ff refs/heads/ff" dst/push-cert &&
-	grep "$noop $noff refs/heads/noff" dst/push-cert &&
+	test_grep "$noop $ff refs/heads/ff" dst/push-cert &&
+	test_grep "$noop $noff refs/heads/noff" dst/push-cert &&
 	test_cmp expect dst/push-cert-status
 '
 
@@ -388,7 +378,7 @@ test_expect_success GPG 'failed atomic push does not execute GPG' '
 			--signed --atomic --porcelain \
 			dst noop ff noff >out 2>err &&
 
-	test_i18ngrep ! "gpg failed to sign" err &&
+	test_grep ! "gpg failed to sign" err &&
 	cat >expect <<-EOF &&
 	To dst
 	=	refs/heads/noop:refs/heads/noop	[up to date]

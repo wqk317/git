@@ -72,7 +72,7 @@ test_expect_success 'nothing recorded without rerere' '
 	rm -rf .git/rr-cache &&
 	git config rerere.enabled false &&
 	test_must_fail git merge first &&
-	! test -d .git/rr-cache
+	test_path_is_missing .git/rr-cache
 '
 
 test_expect_success 'activate rerere, old style (conflicting merge)' '
@@ -81,11 +81,11 @@ test_expect_success 'activate rerere, old style (conflicting merge)' '
 	test_might_fail git config --unset rerere.enabled &&
 	test_must_fail git merge first &&
 
-	sha1=$(perl -pe "s/	.*//" .git/MERGE_RR) &&
+	sha1=$(sed "s/	.*//" .git/MERGE_RR) &&
 	rr=.git/rr-cache/$sha1 &&
-	grep "^=======\$" $rr/preimage &&
-	! test -f $rr/postimage &&
-	! test -f $rr/thisimage
+	test_grep "^=======\$" $rr/preimage &&
+	test_path_is_missing $rr/postimage &&
+	test_path_is_missing $rr/thisimage
 '
 
 test_expect_success 'rerere.enabled works, too' '
@@ -94,9 +94,9 @@ test_expect_success 'rerere.enabled works, too' '
 	git reset --hard &&
 	test_must_fail git merge first &&
 
-	sha1=$(perl -pe "s/	.*//" .git/MERGE_RR) &&
+	sha1=$(sed "s/	.*//" .git/MERGE_RR) &&
 	rr=.git/rr-cache/$sha1 &&
-	grep ^=======$ $rr/preimage
+	test_grep ^=======$ $rr/preimage
 '
 
 test_expect_success 'set up rr-cache' '
@@ -104,14 +104,14 @@ test_expect_success 'set up rr-cache' '
 	git config rerere.enabled true &&
 	git reset --hard &&
 	test_must_fail git merge first &&
-	sha1=$(perl -pe "s/	.*//" .git/MERGE_RR) &&
+	sha1=$(sed "s/	.*//" .git/MERGE_RR) &&
 	rr=.git/rr-cache/$sha1
 '
 
 test_expect_success 'rr-cache looks sane' '
 	# no postimage or thisimage yet
-	! test -f $rr/postimage &&
-	! test -f $rr/thisimage &&
+	test_path_is_missing $rr/postimage &&
+	test_path_is_missing $rr/thisimage &&
 
 	# preimage has right number of lines
 	cnt=$(sed -ne "/^<<<<<<</,/^>>>>>>>/p" $rr/preimage | wc -l) &&
@@ -167,7 +167,7 @@ test_expect_success 'first postimage wins' '
 	git show first:a1 | sed "s/To die: t/To die! T/" >expect &&
 
 	git commit -q -a -m "prefer first over second" &&
-	test -f $rr/postimage &&
+	test_path_is_file $rr/postimage &&
 
 	oldmtimepost=$(test-tool chmtime --get -60 $rr/postimage) &&
 
@@ -177,7 +177,7 @@ test_expect_success 'first postimage wins' '
 
 	test_must_fail git merge first &&
 	# rerere kicked in
-	! grep "^=======\$" a1 &&
+	test_grep ! "^=======\$" a1 &&
 	test_cmp expect a1
 '
 
@@ -188,16 +188,16 @@ test_expect_success 'rerere updates postimage timestamp' '
 
 test_expect_success 'rerere clear' '
 	mv $rr/postimage .git/post-saved &&
-	echo "$sha1	a1" | perl -pe "y/\012/\000/" >.git/MERGE_RR &&
+	echo "$sha1	a1" | tr "\012" "\000" >.git/MERGE_RR &&
 	git rerere clear &&
-	! test -d $rr
+	test_path_is_missing $rr
 '
 
 test_expect_success 'leftover directory' '
 	git reset --hard &&
 	mkdir -p $rr &&
 	test_must_fail git merge first &&
-	test -f $rr/preimage
+	test_path_is_file $rr/preimage
 '
 
 test_expect_success 'missing preimage' '
@@ -205,7 +205,7 @@ test_expect_success 'missing preimage' '
 	mkdir -p $rr &&
 	cp .git/post-saved $rr/postimage &&
 	test_must_fail git merge first &&
-	test -f $rr/preimage
+	test_path_is_file $rr/preimage
 '
 
 test_expect_success 'set up for garbage collection tests' '
@@ -230,16 +230,16 @@ test_expect_success 'set up for garbage collection tests' '
 
 test_expect_success 'gc preserves young or recently used records' '
 	git rerere gc &&
-	test -f $rr/preimage &&
-	test -f $rr2/preimage
+	test_path_is_file $rr/preimage &&
+	test_path_is_file $rr2/preimage
 '
 
 test_expect_success 'old records rest in peace' '
 	test-tool chmtime =$just_over_60_days_ago $rr/postimage &&
 	test-tool chmtime =$just_over_15_days_ago $rr2/preimage &&
 	git rerere gc &&
-	! test -f $rr/preimage &&
-	! test -f $rr2/preimage
+	test_path_is_missing $rr/preimage &&
+	test_path_is_missing $rr2/preimage
 '
 
 rerere_gc_custom_expiry_test () {
@@ -365,9 +365,6 @@ test_expect_success 'set up an unresolved merge' '
 	test_might_fail git config --unset rerere.autoupdate &&
 	git reset --hard &&
 	git checkout version2 &&
-	fifth=$(git rev-parse fifth) &&
-	echo "$fifth		branch fifth of ." |
-	git fmt-merge-msg >msg &&
 	ancestor=$(git merge-base version2 fifth) &&
 	test_must_fail git merge-recursive "$ancestor" -- HEAD fifth &&
 
@@ -436,13 +433,13 @@ test_expect_success 'rerere --no-no-rerere-autoupdate' '
 	git update-index --index-info <failedmerge &&
 	cp file3.conflict file3 &&
 	test_must_fail git rerere --no-no-rerere-autoupdate 2>err &&
-	test_i18ngrep [Uu]sage err &&
+	test_grep [Uu]sage err &&
 	test_must_fail git update-index --refresh
 '
 
 test_expect_success 'rerere -h' '
-	test_must_fail git rerere -h >help &&
-	test_i18ngrep [Uu]sage help
+	git rerere -h >help &&
+	test_grep [Uu]sage help
 '
 
 concat_insert () {
@@ -672,6 +669,69 @@ test_expect_success 'test simple stage 1 handling' '
 		git checkout A^0 &&
 		test_must_fail git merge B^0
 	)
+'
+
+test_expect_success 'rerere does not crash with missing preimage' '
+	git config rerere.enabled true &&
+
+	echo bar >test &&
+	git add test &&
+	git commit -m "one" &&
+	git branch rerere_no_crash &&
+
+	echo foo >>test &&
+	git add test &&
+	git commit -m "two" &&
+
+	git checkout rerere_no_crash &&
+	echo "bar" >>test &&
+	git add test &&
+	git commit -m "three" &&
+
+	test_must_fail git rebase main &&
+	rm .git/rr-cache/*/preimage &&
+	git rebase --abort
+'
+
+test_expect_success 'rerere does not crash with unmatched conflict marker' '
+	git config rerere.enabled true &&
+
+	echo bar >test &&
+	git add test &&
+	git commit -m "one" &&
+	git branch rerere_no_preimage &&
+
+	cat >test <<-EOF &&
+	test
+	bar
+	foobar
+	EOF
+	git add test &&
+	git commit -m "two" &&
+
+	git checkout rerere_no_preimage &&
+	echo "bar" >>test &&
+	git add test &&
+	git commit -m "three" &&
+
+	cat >test <<-EOF &&
+	foobar
+	bar
+	bar
+	EOF
+	git add test &&
+	git commit -m "four" &&
+
+	test_must_fail git rebase main &&
+	cat >test <<-EOF &&
+	test
+	bar
+	<<<<<<< HEAD
+	foobar
+	bar
+	EOF
+	git add test &&
+	test_must_fail git rebase --continue
 '
 
 test_done
